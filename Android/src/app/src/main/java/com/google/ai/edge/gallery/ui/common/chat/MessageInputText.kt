@@ -27,6 +27,7 @@ import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
 import android.net.Uri
+import android.provider.OpenableColumns
 import android.util.Log
 import android.util.Size
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -71,6 +72,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.Article
 import androidx.compose.material.icons.automirrored.rounded.Send
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.InsertChart
@@ -81,6 +83,7 @@ import androidx.compose.material.icons.rounded.History
 import androidx.compose.material.icons.rounded.Mic
 import androidx.compose.material.icons.rounded.Photo
 import androidx.compose.material.icons.rounded.PhotoCamera
+import androidx.compose.material.icons.rounded.PictureAsPdf
 import androidx.compose.material.icons.rounded.Stop
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -103,6 +106,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -120,6 +124,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
@@ -130,6 +135,7 @@ import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.google.ai.edge.gallery.R
 import com.google.ai.edge.gallery.common.AudioClip
+import com.google.ai.edge.gallery.common.TextFile
 import com.google.ai.edge.gallery.common.convertWavToMonoWithMaxSeconds
 import com.google.ai.edge.gallery.common.decodeSampledBitmapFromUri
 import com.google.ai.edge.gallery.common.openSafeInputStream
@@ -143,12 +149,17 @@ import com.google.ai.edge.gallery.data.Task
 import com.google.ai.edge.gallery.ui.common.PermissionAccessKind
 import com.google.ai.edge.gallery.ui.common.PermissionAccessTracker
 import com.google.ai.edge.gallery.ui.common.PermissionDeniedDialog
+import com.google.ai.edge.gallery.ui.common.SandboxedPdf
 import com.google.ai.edge.gallery.ui.common.asr.ChatAsrDictationPanel
 import com.google.ai.edge.gallery.ui.common.asr.ChatAsrDictationUiState
 import com.google.ai.edge.gallery.ui.common.asr.rememberChatAsrDictationActions
 import com.google.ai.edge.gallery.ui.common.getTaskIconColor
+import com.google.ai.edge.gallery.ui.common.humanReadableSize
 import com.google.ai.edge.gallery.ui.theme.bodyLargeNarrow
+import java.io.File
+import java.util.UUID
 import java.util.concurrent.Executors
+import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
@@ -204,6 +215,7 @@ fun MessageInputText(
   onToggleLiveMetrics: () -> Unit = {},
   showImagePicker: Boolean = false,
   showAudioPicker: Boolean = false,
+  showTextFilePicker: Boolean = false,
   showStopButtonWhenInProgress: Boolean = false,
   isContextLimitReached: Boolean = false,
   onImageLimitExceeded: () -> Unit = {},
@@ -233,8 +245,13 @@ fun MessageInputText(
   val audioRecorderSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
   var pickedImages by remember { mutableStateOf<List<Bitmap>>(emptyList()) }
   var pickedAudioClips by remember { mutableStateOf<List<AudioClip>>(emptyList()) }
+  var pickedTextFiles by remember { mutableStateOf<List<TextFile>>(emptyList()) }
   var hasFrontCamera by remember { mutableStateOf(false) }
   val sensorObserver = remember { SensorObserver(context) }
+
+  val updatePickedTextFiles: (List<TextFile>) -> Unit = { textFilesList ->
+    pickedTextFiles = textFilesList
+  }
 
   val updatePickedImages: (List<Bitmap>) -> Unit = { bitmaps ->
     val isAiCore = selectedModel.isAiCore
@@ -336,11 +353,13 @@ fun MessageInputText(
           createMessagesToSend(
             pickedImages = pickedImages,
             audioClips = pickedAudioClips,
+            textFiles = pickedTextFiles,
             text = mergedText,
           )
         )
         pickedImages = emptyList()
         pickedAudioClips = emptyList()
+        pickedTextFiles = emptyList()
       },
       onStartAsrDictation = onStartAsrDictation,
       onFinishAsrDictation = onFinishAsrDictation,
@@ -390,14 +409,45 @@ fun MessageInputText(
       }
     }
 
+  val pickTextFile =
+    rememberLauncherForActivityResult(
+      contract = ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+      if (result.resultCode == Activity.RESULT_OK) {
+        val uris = mutableListOf<Uri>()
+        result.data?.clipData?.let { clipData ->
+          for (i in 0 until clipData.itemCount) {
+            uris.add(clipData.getItemAt(i).uri)
+          }
+        } ?: result.data?.data?.let { uri -> uris.add(uri) }
+        if (uris.isNotEmpty()) {
+          scope.launch(Dispatchers.IO) {
+            handleTextFilesSelected(
+              context = context,
+              uris = uris,
+              onTextFilesSelected = { textFiles ->
+                scope.launch(Dispatchers.Main) {
+                  updatePickedTextFiles(pickedTextFiles + textFiles)
+                }
+              },
+            )
+          }
+        }
+      } else {
+        Log.d(TAG, "Text file picking cancelled.")
+      }
+    }
+
   DisposableEffect(lifecycleOwner) {
     lifecycleOwner.lifecycle.addObserver(sensorObserver)
     onDispose { lifecycleOwner.lifecycle.removeObserver(sensorObserver) }
   }
 
   Column {
-    // A preview panel for the selected images and audio clips.
-    if (pickedImages.isNotEmpty() || pickedAudioClips.isNotEmpty()) {
+    // A preview panel for the selected images, audio clips, and text files.
+    if (
+      pickedImages.isNotEmpty() || pickedAudioClips.isNotEmpty() || pickedTextFiles.isNotEmpty()
+    ) {
       Row(
         modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
         horizontalArrangement = Arrangement.spacedBy(16.dp),
@@ -438,6 +488,65 @@ fun MessageInputText(
             MediaPanelCloseButton {
               pickedAudioClips = pickedAudioClips.filterIndexed { curIndex, curAudioData ->
                 curIndex != index
+              }
+            }
+          }
+        }
+
+        for ((index, textFile) in pickedTextFiles.withIndex()) {
+          key(textFile.localPath ?: textFile.name) {
+            Box(contentAlignment = Alignment.TopEnd) {
+              Box(
+                modifier =
+                  Modifier.shadow(2.dp, shape = RoundedCornerShape(8.dp))
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(MaterialTheme.colorScheme.surface)
+                    .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(8.dp))
+                    .padding(horizontal = 12.dp, vertical = 8.dp)
+              ) {
+                Row(
+                  verticalAlignment = Alignment.CenterVertically,
+                  horizontalArrangement = Arrangement.spacedBy(8.dp),
+                  modifier = Modifier.padding(end = 16.dp),
+                ) {
+                  Icon(
+                    if (isPdfFile(name = textFile.name, path = textFile.localPath)) {
+                      Icons.Rounded.PictureAsPdf
+                    } else {
+                      Icons.AutoMirrored.Rounded.Article
+                    },
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(24.dp),
+                  )
+                  Column {
+                    Text(
+                      text = textFile.name,
+                      style = MaterialTheme.typography.labelMedium,
+                      maxLines = 1,
+                      overflow = TextOverflow.Ellipsis,
+                      modifier = Modifier.widthIn(max = 140.dp),
+                    )
+                    FileSubtitle(
+                      sizeString = textFile.sizeString,
+                      hasText = textFile.content.isNotBlank(),
+                      color =
+                        if (textFile.content.isNotBlank()) {
+                          MaterialTheme.colorScheme.outline
+                        } else {
+                          MaterialTheme.colorScheme.error
+                        },
+                    )
+                  }
+                }
+              }
+              MediaPanelCloseButton {
+                pickedTextFiles = pickedTextFiles.filterIndexed { curIndex, _ -> curIndex != index }
+                // The pending copy is only needed once the file is sent, so delete it when
+                // unstaged.
+                textFile.localPath?.let { path ->
+                  scope.launch(Dispatchers.IO) { File(path).delete() }
+                }
               }
             }
           }
@@ -749,6 +858,43 @@ fun MessageInputText(
                         )
                       }
 
+                      if (showTextFilePicker) {
+                        DropdownMenuItem(
+                          text = {
+                            Row(
+                              verticalAlignment = Alignment.CenterVertically,
+                              horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            ) {
+                              Icon(Icons.AutoMirrored.Rounded.Article, contentDescription = null)
+                              Text(stringResource(R.string.media_picker_import_text_file))
+                            }
+                          },
+                          onClick = {
+                            showAddContentMenu = false
+
+                            // Show file picker for text, markdown, and PDF files.
+                            val intent =
+                              Intent(Intent.ACTION_GET_CONTENT).apply {
+                                addCategory(Intent.CATEGORY_OPENABLE)
+                                type = "*/*"
+                                val mimeTypes =
+                                  arrayOf(
+                                    "text/plain",
+                                    "text/markdown",
+                                    "text/x-markdown",
+                                    "application/pdf",
+                                    "text/*",
+                                    "application/octet-stream",
+                                  )
+                                putExtra(Intent.EXTRA_MIME_TYPES, mimeTypes)
+                                putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
+                                  .addFlags(Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
+                                  .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                              }
+                            pickTextFile.launch(intent)
+                          },
+                        )
+                      }
                       // Prompt history.
                       DropdownMenuItem(
                         text = {
@@ -890,18 +1036,22 @@ fun MessageInputText(
                       !inProgress &&
                         !isResettingSession &&
                         !isContextLimitReached &&
-                        (curMessage.isNotEmpty() || pickedAudioClips.isNotEmpty()),
+                        (curMessage.isNotEmpty() ||
+                          pickedAudioClips.isNotEmpty() ||
+                          pickedTextFiles.isNotEmpty()),
                     onClick = {
                       var message = curMessage.trim()
                       onSendMessage(
                         createMessagesToSend(
                           pickedImages = pickedImages,
                           audioClips = pickedAudioClips,
+                          textFiles = pickedTextFiles,
                           text = message,
                         )
                       )
                       pickedImages = emptyList()
                       pickedAudioClips = emptyList()
+                      pickedTextFiles = emptyList()
                     },
                     colors =
                       IconButtonDefaults.iconButtonColors(
@@ -964,11 +1114,13 @@ fun MessageInputText(
           createMessagesToSend(
             pickedImages = pickedImages,
             audioClips = pickedAudioClips,
+            textFiles = pickedTextFiles,
             text = item,
           )
         )
         pickedImages = emptyList()
         pickedAudioClips = emptyList()
+        pickedTextFiles = emptyList()
         onPromoteTextInputHistoryItem(item)
       },
       onHistoryItemDeleted = onDeleteTextInputHistoryItem,
@@ -1268,6 +1420,7 @@ private fun checkFrontCamera(context: Context, callback: (Boolean) -> Unit) {
 private fun createMessagesToSend(
   pickedImages: List<Bitmap>,
   audioClips: List<AudioClip>,
+  textFiles: List<TextFile> = listOf(),
   text: String,
 ): List<ChatMessage> {
   val messages: MutableList<ChatMessage> = mutableListOf()
@@ -1307,11 +1460,131 @@ private fun createMessagesToSend(
   }
   messages.addAll(audioMessages)
 
+  // Add file messages.
+  for (textFile in textFiles) {
+    messages.add(
+      ChatMessageFile(
+        name = textFile.name,
+        content = textFile.content,
+        sizeString = textFile.sizeString,
+        uri = textFile.uri,
+        side = ChatSide.USER,
+        localPath = textFile.localPath,
+      )
+    )
+  }
+
   if (text.isNotEmpty()) {
     messages.add(ChatMessageText(content = text, side = ChatSide.USER))
   }
 
   return messages
+}
+
+private suspend fun handleTextFilesSelected(
+  context: Context,
+  uris: List<Uri>,
+  onTextFilesSelected: (List<TextFile>) -> Unit,
+) {
+  val textFiles: MutableList<TextFile> = mutableListOf()
+  for (uri in uris) {
+    try {
+      var displayName: String? = null
+      var fileSize: Long = -1L
+
+      if (uri.scheme == "content") {
+        context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+          if (cursor.moveToFirst()) {
+            val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+            if (nameIndex != -1) {
+              displayName = cursor.getString(nameIndex)
+            }
+            val sizeIndex = cursor.getColumnIndex(OpenableColumns.SIZE)
+            // The size column can be NULL for stream-based providers, in which case the size of the
+            // local copy is used instead.
+            if (sizeIndex != -1 && !cursor.isNull(sizeIndex)) {
+              fileSize = cursor.getLong(sizeIndex)
+            }
+          }
+        }
+      }
+
+      if (displayName.isNullOrBlank()) {
+        displayName = uri.lastPathSegment?.substringAfterLast('/') ?: "file.txt"
+      }
+
+      val mimeType = if (uri.scheme == "content") context.contentResolver.getType(uri) else null
+      val isPdf = (mimeType == "application/pdf") || displayName.endsWith(".pdf", ignoreCase = true)
+
+      // Keep an app-private copy of the file so it can be reopened later (e.g. from chat history)
+      // after the temporary read permission for the picked uri is gone.
+      val localFile =
+        copyToLocalAttachmentFile(
+          context = context,
+          uri = uri,
+          extension =
+            if (isPdf) "pdf" else displayName.substringAfterLast('.', missingDelimiterValue = ""),
+        )
+      if (localFile == null) {
+        Log.e(TAG, "Failed to copy picked file from uri $uri")
+        continue
+      }
+
+      // PDFs are attached even when no text can be extracted (e.g. scanned PDFs, or devices that
+      // do not support text extraction), so their pages can still be viewed and the model can tell
+      // the user that it cannot read them. See formatAttachedFilePrompt.
+      val content =
+        if (isPdf) {
+          SandboxedPdf.extractText(context, localFile).orEmpty().also {
+            if (it.isEmpty()) {
+              Log.w(TAG, "No readable text extracted from PDF: $displayName")
+            }
+          }
+        } else {
+          localFile.readText(Charsets.UTF_8)
+        }
+
+      if (isPdf || content.isNotBlank()) {
+        if (fileSize < 0) {
+          fileSize = localFile.length()
+        }
+        val sizeString = fileSize.humanReadableSize(si = false)
+        textFiles.add(
+          TextFile(
+            name = displayName,
+            content = content,
+            sizeString = sizeString,
+            uri = uri,
+            localPath = localFile.absolutePath,
+          )
+        )
+      } else {
+        localFile.delete()
+      }
+    } catch (e: CancellationException) {
+      throw e
+    } catch (e: Exception) {
+      Log.e(TAG, "Error reading text file from uri $uri", e)
+    }
+  }
+  if (textFiles.isNotEmpty()) {
+    onTextFilesSelected(textFiles)
+  }
+}
+
+/**
+ * Copies the content behind [uri] into a pending attachment file with the given [extension] in the
+ * app's cache dir. Returns the copied file, or null if the uri could not be opened.
+ */
+private fun copyToLocalAttachmentFile(context: Context, uri: Uri, extension: String): File? {
+  val inputStream = openSafeInputStream(context, uri) ?: return null
+  val safeExtension = extension.filter { it.isLetterOrDigit() }.take(8)
+  val fileName =
+    "attachment_pending_${UUID.randomUUID()}" +
+      if (safeExtension.isEmpty()) "" else ".$safeExtension"
+  val file = File(context.cacheDir, fileName)
+  inputStream.use { input -> file.outputStream().use { output -> input.copyTo(output) } }
+  return file
 }
 
 /**
