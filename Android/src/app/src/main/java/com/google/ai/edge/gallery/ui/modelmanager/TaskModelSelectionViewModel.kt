@@ -220,13 +220,15 @@ internal fun ttsEngineIdOf(model: Model): String =
   model.ttsProfile?.engineModelId?.ifEmpty { null } ?: model.name
 
 /**
- * Whether [model] is the TTS model saved as [savedEngineId]. The Android System voice never
- * matches, as it means that no model is selected.
+ * Whether [model] is the TTS model saved as [savedEngineId].
  */
-internal fun isSavedTtsModel(model: Model, savedEngineId: String): Boolean =
-  model.modelType == ModelType.TTS &&
-    !TtsModelIdentifier.isSystemEngine(savedEngineId) &&
-    savedEngineId == ttsEngineIdOf(model)
+internal fun isSavedTtsModel(model: Model, savedEngineId: String): Boolean {
+  if (model.modelType != ModelType.TTS) return false
+  val engineId = ttsEngineIdOf(model)
+  return savedEngineId == engineId ||
+    savedEngineId == model.name ||
+    (TtsModelIdentifier.isSystemEngine(savedEngineId) && TtsModelIdentifier.isSystemEngine(engineId))
+}
 
 /**
  * Returns the supported BCP-47 language tags for a speech candidate [model] in [target], excluding

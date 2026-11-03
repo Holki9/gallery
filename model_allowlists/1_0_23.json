@@ -17,7 +17,18 @@
         "defaultVoice": "",
         "languages": [
           "ru-RU",
-          "en-US"
+          "en-US",
+          "es-ES",
+          "fr-FR",
+          "de-DE",
+          "it-IT",
+          "ja-JP",
+          "ko-KR",
+          "zh-CN",
+          "pt-BR",
+          "pl-PL",
+          "tr-TR",
+          "uk-UA"
         ]
       }
     },

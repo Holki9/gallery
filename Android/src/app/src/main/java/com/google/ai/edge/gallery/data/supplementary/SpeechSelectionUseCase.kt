@@ -214,7 +214,13 @@ constructor(
   /** Whether [selection] saves [model] as the default engine of its modality. */
   fun isSavedDefault(model: Model, selection: SpeechSelection = currentSelection()): Boolean =
     when (model.modelType) {
-      ModelType.TTS -> selection.ttsEngineId == ttsEngineIdOf(model)
+      ModelType.TTS -> {
+        val engineId = ttsEngineIdOf(model)
+        selection.ttsEngineId == engineId ||
+          selection.ttsEngineId == model.name ||
+          (TtsModelIdentifier.isSystemEngine(selection.ttsEngineId) &&
+            TtsModelIdentifier.isSystemEngine(engineId))
+      }
       ModelType.ASR -> {
         val cardEngineType = AsrModelRegistry.engineTypeForModelId(model.modelId)
         if (cardEngineType != null) {

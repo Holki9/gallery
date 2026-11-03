@@ -75,11 +75,27 @@ internal constructor(
             refreshCachedVoicesAndLanguages()
             cachedCapabilities
           }
-      val locales = snapshot?.languages.orEmpty()
+      val defaultLocales =
+        listOf(
+          "ru-RU",
+          "en-US",
+          "es-ES",
+          "fr-FR",
+          "de-DE",
+          "it-IT",
+          "ja-JP",
+          "ko-KR",
+          "zh-CN",
+          "pt-BR",
+          "pl-PL",
+          "tr-TR",
+          "uk-UA",
+        )
+      val locales = snapshot?.languages?.ifEmpty { defaultLocales } ?: defaultLocales
       val voices =
         snapshot?.voices?.ifEmpty { listOf(TtsSettingsRepository.DEFAULT_SYSTEM_VOICE) }
           ?: listOf(TtsSettingsRepository.DEFAULT_SYSTEM_VOICE)
-      return listOf(
+      val base =
         TtsModelMetadata(
           modelId = TtsModelIdentifier.ANDROID_NATIVE,
           displayName = "Android Native TTS",
@@ -89,6 +105,10 @@ internal constructor(
           voiceDescriptions = snapshot?.voiceDescriptions.orEmpty(),
           voiceLocales = snapshot?.voiceLocales.orEmpty(),
         )
+      return listOf(
+        base,
+        base.copy(modelId = TtsModelIdentifier.ANDROID_SYSTEM, displayName = "Android System TTS"),
+        base.copy(modelId = TtsModelIdentifier.ANDROID_NATIVE_TTS),
       )
     }
 

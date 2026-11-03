@@ -59,13 +59,22 @@ import kotlinx.coroutines.withContext
 internal fun XrLanguageTeacherViewModel.getSupportedLocaleTagsForTtsModel(
   modelId: String
 ): List<String> {
+  if (TtsModelIdentifier.isSystemEngine(modelId)) {
+    val service = ttsServiceProvider.serviceOrNull(forModelId = modelId)
+    val fromPlatform =
+      service?.availableModels?.flatMap { it.supportedLanguages }?.distinct().orEmpty()
+    if (fromPlatform.isNotEmpty()) {
+      return fromPlatform
+    }
+  }
   speechSelectionUseCase.ttsModelFor(modelId)?.let { model ->
-    return speechSelectionUseCase.supportedLanguageCodes(model)
+    val codes = speechSelectionUseCase.supportedLanguageCodes(model)
+    if (codes.isNotEmpty()) return codes
   }
   return ttsServiceProvider
     .serviceOrNull(forModelId = modelId)
     ?.availableModels
-    ?.find { it.modelId == modelId }
+    ?.find { it.modelId == modelId || TtsModelIdentifier.isSystemEngine(it.modelId) }
     ?.supportedLanguages
     .orEmpty()
 }
