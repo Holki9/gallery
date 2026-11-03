@@ -32,6 +32,10 @@ import com.squareup.moshi.JsonClass
 import com.squareup.moshi.Moshi
 import dagger.hilt.android.EntryPointAccessors
 import java.lang.Exception
+import java.io.File
+import org.json.JSONObject
+import org.json.JSONArray
+
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
@@ -75,7 +79,12 @@ enum class IntentAction(val action: String) {
   CREATE_CALENDAR_EVENT("create_calendar_event"),
   READ_CALENDAR_EVENTS("read_calendar_events"),
   GET_CURRENT_DATE_AND_TIME("get_current_date_and_time"),
-  SCHEDULE_NOTIFICATION("schedule_notification");
+  SCHEDULE_NOTIFICATION("schedule_notification"),
+  OPEN_APP("open_app"),
+  EXECUTE_SHELL("execute_shell"),
+  ANALYZE_STORAGE("analyze_storage"),
+  FIND_FILES("find_files"),
+  READ_FILE("read_file");
 
   companion object {
     fun from(action: String): IntentAction? = entries.find { it.action == action }
@@ -197,7 +206,171 @@ object IntentHandler {
       IntentAction.SCHEDULE_NOTIFICATION -> {
         scheduleNotification(context, parameters)
       }
+      IntentAction.OPEN_APP -> openApp(context, parameters)
+      IntentAction.EXECUTE_SHELL -> executeShell(parameters)
+      IntentAction.ANALYZE_STORAGE -> analyzeStorage()
+      IntentAction.FIND_FILES -> findFiles(parameters)
+      IntentAction.READ_FILE -> readFile(parameters)
       null -> "failed"
+    }
+  }
+
+  private fun openApp(context: Context, parameters: String): String {
+    return try {
+      val json = JSONObject(parameters)
+      val appName = json.optString("app_name", "").trim()
+      if (appName.isEmpty()) return "failed: app_name is required"
+      val pm = context.packageManager
+      val intent = Intent(Intent.ACTION_MAIN, null).apply {
+        addCategory(Intent.CATEGORY_LAUNCHER)
+      }
+      val list = pm.queryIntentActivities(intent, 0)
+      var matchedPkg: String? = null
+      var matchedLabel: String? = null
+      for (info in list) {
+        val label = info.loadLabel(pm).toString()
+        val pkg = info.activityInfo.packageName
+        if (label.equals(appName, ignoreCase = true) || pkg.equals(appName, ignoreCase = true)) {
+          matchedPkg = pkg
+          matchedLabel = label
+          break
+        }
+      }
+      if (matchedPkg == null) {
+        for (info in list) {
+          val label = info.loadLabel(pm).toString()
+          val pkg = info.activityInfo.packageName
+          if (label.contains(appName, ignoreCase = true) || pkg.contains(appName, ignoreCase = true)) {
+            matchedPkg = pkg
+            matchedLabel = label
+            break
+          }
+        }
+      }
+      if (matchedPkg != null) {
+        val launchIntent = pm.getLaunchIntentForPackage(matchedPkg)
+        if (launchIntent != null) {
+          launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+          context.startActivity(launchIntent)
+          "succeeded: Application '$matchedLabel' ($matchedPkg) opened successfully."
+        } else {
+          "failed: Cannot launch $matchedPkg"
+        }
+      } else {
+        val sample = list.take(10).joinToString(", ") { it.loadLabel(pm).toString() }
+        "failed: App '$appName' not found. Available sample: $sample"
+      }
+    } catch (e: Exception) {
+      Log.e(TAG, "Failed openApp", e)
+      "failed: ${e.message}"
+    }
+  }
+
+  private fun executeShell(parameters: String): String {
+    return try {
+      val json = JSONObject(parameters)
+      val command = json.optString("command", "").trim()
+      if (command.isEmpty()) return "failed: command is required"
+      val proc = Runtime.getRuntime().exec(arrayOf("sh", "-c", command))
+      val stdout = proc.inputStream.bufferedReader().readText().take(3000)
+      val stderr = proc.errorStream.bufferedReader().readText().take(1000)
+      val code = proc.waitFor()
+      val res = JSONObject().apply {
+        put("command", command)
+        put("exit_code", code)
+        put("stdout", stdout.ifEmpty { "(no output)" })
+        if (stderr.isNotEmpty()) put("stderr", stderr)
+      }
+      res.toString()
+    } catch (e: Exception) {
+      Log.e(TAG, "Failed executeShell", e)
+      "failed: ${e.message}"
+    }
+  }
+
+  private fun analyzeStorage(): String {
+    return try {
+      val stat = android.os.StatFs(android.os.Environment.getDataDirectory().path)
+      val block = stat.blockSizeLong
+      val total = stat.blockCountLong * block
+      val free = stat.availableBlocksLong * block
+      val used = total - free
+
+      fun fmt(bytes: Long): String {
+        val gb = bytes.toDouble() / (1024.0 * 1024.0 * 1024.0)
+        return String.format(Locale.US, "%.1f GB", gb)
+      }
+
+      val folders = mutableMapOf<String, String>()
+      val sdcard = File("/sdcard")
+      if (sdcard.exists() && sdcard.isDirectory) {
+        listOf("Download", "DCIM", "Pictures", "Telegram", "Documents", "Android").forEach { name ->
+          val f = File(sdcard, name)
+          if (f.exists()) {
+            val sz = f.walkTopDown().maxDepth(3).filter { it.isFile }.map { it.length() }.sum()
+            if (sz > 0) folders[name] = fmt(sz)
+          }
+        }
+      }
+
+      val res = JSONObject().apply {
+        put("total_storage", fmt(total))
+        put("used_storage", fmt(used))
+        put("free_storage", fmt(free))
+        put("folder_sizes", JSONObject(folders as Map<*, *>))
+      }
+      res.toString()
+    } catch (e: Exception) {
+      Log.e(TAG, "Failed analyzeStorage", e)
+      "failed: ${e.message}"
+    }
+  }
+
+  private fun findFiles(parameters: String): String {
+    return try {
+      val json = JSONObject(parameters)
+      val query = json.optString("query", "").trim()
+      val path = json.optString("path", "/sdcard").trim()
+      val root = File(path)
+      if (!root.exists() || !root.isDirectory) return "failed: directory '$path' not found"
+
+      val list = JSONArray()
+      root.walkTopDown().maxDepth(5).filter { it.isFile && (query.isEmpty() || it.name.contains(query, ignoreCase = true)) }.take(30).forEach { f ->
+        val mb = f.length().toDouble() / (1024 * 1024)
+        val sz = if (mb >= 1.0) String.format(Locale.US, "%.2f MB", mb) else "${f.length() / 1024} KB"
+        list.put(JSONObject().apply {
+          put("name", f.name)
+          put("path", f.absolutePath)
+          put("size", sz)
+        })
+      }
+      JSONObject().apply {
+        put("query", query)
+        put("count", list.length())
+        put("results", list)
+      }.toString()
+    } catch (e: Exception) {
+      Log.e(TAG, "Failed findFiles", e)
+      "failed: ${e.message}"
+    }
+  }
+
+  private fun readFile(parameters: String): String {
+    return try {
+      val json = JSONObject(parameters)
+      val path = json.optString("file_path", "").trim()
+      val f = File(path)
+      if (!f.exists()) return "failed: file not found: $path"
+      if (f.isDirectory) return "failed: $path is a directory"
+      val text = f.readText().take(4000)
+      JSONObject().apply {
+        put("path", path)
+        put("bytes", f.length())
+        put("content", text)
+      }.toString()
+    } catch (e: Exception) {
+      Log.e(TAG, "Failed readFile", e)
+      "failed: ${e.message}"
     }
   }
 
