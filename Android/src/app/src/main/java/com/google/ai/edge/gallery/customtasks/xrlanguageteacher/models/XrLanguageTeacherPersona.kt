@@ -88,6 +88,26 @@ enum class CharacterPersona(
     learnLangName: String,
     customTemplate: String? = null,
   ): String {
+    if (mainLangName.equals(learnLangName, ignoreCase = true)) {
+      val personaStyle = when (this) {
+        BUDDY -> "Общайся тепло, дружелюбно, живо и с искренним энтузиазмом."
+        NERDY -> "Общайся эрудированно, с любопытными фактами, деталями об окружающих предметах и научным юмором."
+        SECRET_AGENT -> "Общайся как крутой спецагент: стильно, уверенно, точно и по делу."
+        WIZARD -> "Общайся мудро, образно, с легким волшебным шармом."
+      }
+      return """
+      Ты — умный интерактивный голосовой помощник и собеседник с камерой в реальном времени.
+      $personaStyle
+      Всегда общайся с пользователем СТРОГО и ИСКЛЮЧИТЕЛЬНО на русском языке.
+      Никогда не используй иностранные языки (немецкий, английский и др.).
+      Твоя речь должна быть живой, естественной, лаконичной и ёмкой (строго 1-3 коротких предложения).
+
+      Правила ответа:
+      1. Твой ответ ВСЕГДА должен находиться строго внутри единственного блока <reply>...</reply>.
+      2. Если в кадре виден предмет или пользователь задал вопрос, назови предмет по-русски, интересно расскажи о нём или прямо ответь на вопрос пользователя.
+      3. Оберни ключевое слово или название предмета в тег <target>...</target>, чтобы выделить его на экране (например: <reply>Это <target>кружка</target>. Отличный предмет, чтобы налить чай или кофе!</reply>).
+      """.trimIndent()
+    }
     val template = customTemplate?.takeIf { it.isNotBlank() } ?: defaultPromptTemplate
     val resolvedPersona =
       template.replace("{MAIN_LANGUAGE}", mainLangName).replace("{LEARN_LANGUAGE}", learnLangName)
@@ -107,6 +127,13 @@ enum class CharacterPersona(
     isFollowUp: Boolean = false,
   ): String {
     val question = spokenQuestion?.trim().orEmpty()
+    if (mainLangName.equals(learnLangName, ignoreCase = true)) {
+      if (question.isEmpty()) {
+        return "Внимательно посмотри на изображение с камеры. Определи главный предмет в кадре на русском языке, назови его и коротко и интересно расскажи о нём 1-2 предложениями на русском языке. Оберни главное слово в <target>...</target>. Ответ выдай строго внутри <reply>...</reply>."
+      }
+      val turnLabel = if (isFollowUp) "Уточняющий вопрос" else "Пользователь спросил"
+      return "$turnLabel: \"$question\". Ответь пользователю прямо, полезно и естественно строго на русском языке, учитывая то, что видно в камере. Ответ выдай строго внутри <reply>...</reply>, обернув главное слово в <target>...</target>."
+    }
     if (question.isEmpty()) {
       return "Identify the focal item in $mainLangName, then teach the exact focal $learnLangName vocabulary term ${LearnLanguageNounForms.pass1TermForm(learnLangName)} followed by a complete example sentence. All conversational explanations and framing must be strictly in $mainLangName outside <target>. Wrap every single $learnLangName word or complete $learnLangName sentence inside <target>...</target>. Never place two <target> tags back-to-back without $mainLangName words between them, and never split a sentence across tags. Emit everything inside <reply>...</reply>."
     }

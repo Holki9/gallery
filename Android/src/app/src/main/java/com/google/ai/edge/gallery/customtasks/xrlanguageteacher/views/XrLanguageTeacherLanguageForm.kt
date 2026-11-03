@@ -561,7 +561,10 @@ private fun LanguageDropdownField(
                 showInstalledBadge = true,
               )
             },
-            onClick = { onLanguageSelected(language) },
+            onClick = {
+              onLanguageSelected(language)
+              expanded = false
+            },
             // A language that isn't installed can't be picked until its download finishes.
             enabled = isSelectable,
           )

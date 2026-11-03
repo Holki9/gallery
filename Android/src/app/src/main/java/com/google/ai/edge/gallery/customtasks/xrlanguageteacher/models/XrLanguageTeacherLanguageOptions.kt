@@ -36,11 +36,12 @@ data class TeacherLanguageOptions(val native: List<Language>, val learn: List<La
     get() = native.isNotEmpty()
 
   /** The languages to offer for learning while the native language is [mainLanguage]. */
-  fun learnOptionsFor(mainLanguage: Language): List<Language> = learn.filter { it != mainLanguage }
+  fun learnOptionsFor(mainLanguage: Language): List<Language> =
+    (listOf(mainLanguage) + learn).distinct()
 
   /**
    * Returns the languages to use for [saved] with these options: each saved language if the models
-   * support it, otherwise a supported replacement. The language to learn is never the native one.
+   * support it, otherwise a supported replacement.
    *
    * Keeps [saved] when the models share no language, because no choice can work then; the model
    * selection doesn't offer such a pair.
@@ -51,14 +52,13 @@ data class TeacherLanguageOptions(val native: List<Language>, val learn: List<La
       resolveSupportedLanguage(
         current = saved.main,
         supportedLanguages = native,
-        preferredFallback = Language.LANGUAGE_ENGLISH,
+        preferredFallback = Language.LANGUAGE_RUSSIAN,
       )
     val learn =
       resolveSupportedLanguage(
         current = saved.learn,
-        supportedLanguages = learn,
-        preferredFallback = defaultLearnLanguage(main),
-        avoidLanguage = main,
+        supportedLanguages = (listOf(main) + learn).distinct(),
+        preferredFallback = main,
       )
     return TeacherLanguages(main = main, learn = learn)
   }

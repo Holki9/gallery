@@ -223,8 +223,7 @@ fun Language.orDefaultMainLanguage(): Language =
  * English when [mainLanguage] is already [DEFAULT_LEARN_LANGUAGE], so the student is never taught
  * their own native language.
  */
-internal fun defaultLearnLanguage(mainLanguage: Language): Language =
-  if (mainLanguage == DEFAULT_LEARN_LANGUAGE) Language.LANGUAGE_ENGLISH else DEFAULT_LEARN_LANGUAGE
+internal fun defaultLearnLanguage(mainLanguage: Language): Language = mainLanguage
 
 /**
  * Returns this stored learn language, or [defaultLearnLanguage] for [mainLanguage] when it is

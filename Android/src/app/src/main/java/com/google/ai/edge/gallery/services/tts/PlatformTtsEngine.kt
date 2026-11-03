@@ -91,7 +91,7 @@ internal constructor(
           "tr-TR",
           "uk-UA",
         )
-      val locales = snapshot?.languages?.ifEmpty { defaultLocales } ?: defaultLocales
+      val locales = (defaultLocales + (snapshot?.languages.orEmpty())).distinct()
       val voices =
         snapshot?.voices?.ifEmpty { listOf(TtsSettingsRepository.DEFAULT_SYSTEM_VOICE) }
           ?: listOf(TtsSettingsRepository.DEFAULT_SYSTEM_VOICE)
