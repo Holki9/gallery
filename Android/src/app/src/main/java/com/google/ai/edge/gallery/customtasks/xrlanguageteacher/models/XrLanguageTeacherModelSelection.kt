@@ -49,16 +49,12 @@ internal fun isXrLanguageTeacherAsrModel(model: Model): Boolean {
 }
 
 /**
- * Whether [model] is a text-to-speech model XR Language Teacher can use. The Android System voice
- * is never offered, and a TTS model must support more than one language so that there is at least
- * one native language and one target language to learn.
+ * Whether [model] is a text-to-speech model XR Language Teacher can use. A TTS model must support
+ * more than one language so that there is at least one native language and one target language to
+ * learn (or empty, indicating unrestricted language support).
  */
 internal fun isXrLanguageTeacherTtsModel(model: Model): Boolean {
   if (model.modelType != ModelType.TTS) {
-    return false
-  }
-  val engineId = model.ttsProfile?.engineModelId?.ifEmpty { null } ?: model.name
-  if (TtsModelIdentifier.isSystemEngine(engineId)) {
     return false
   }
   val languages = model.ttsProfile?.languages.orEmpty()
@@ -107,7 +103,7 @@ val XR_LANGUAGE_TEACHER_MODEL_SELECTION_CONFIG =
           modelFilter = ::isXrLanguageTeacherTtsModel,
         ),
       ),
-    hideSystemSpeechDefaults = true,
+    hideSystemSpeechDefaults = false,
     speechLanguageOverlap = ::xrLanguageTeacherSpeechLanguageOverlap,
   )
 

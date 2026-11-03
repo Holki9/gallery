@@ -120,10 +120,11 @@ open class TtsServiceProvider(
   open fun serviceOrNull(forEngineType: TtsEngineType): TtsService? = engines[forEngineType]
 
   /**
-   * Returns the concrete [TtsService] instance that serves [forModelId], or `null` if no engine
-   * serves it. Unlike [service], this never falls back to the platform engine.
+   * Returns the concrete [TtsService] instance that serves [forModelId], or the platform engine if
+   * no dedicated neural engine serves it.
    */
-  open fun serviceOrNull(forModelId: String): TtsService? = enginesByModelId[forModelId]
+  open fun serviceOrNull(forModelId: String): TtsService? =
+    enginesByModelId[forModelId] ?: platformEngine
 
   /** Returns the concrete [TtsService] instance that serves [forConfig]. */
   open fun service(forConfig: TtsConfig): TtsService = service(forModelId = forConfig.modelId)

@@ -1,6 +1,27 @@
 {
   "models": [
     {
+      "name": "Android System TTS",
+      "modelId": "android_system_tts",
+      "modelFile": "system-managed",
+      "description": "Android System Text-to-Speech with Russian and offline support.",
+      "sizeInBytes": 0,
+      "commitHash": "1",
+      "taskTypes": [],
+      "bestForTaskTypes": ["tts"],
+      "modelType": "tts",
+      "runtimeType": "unknown",
+      "url": "",
+      "ttsConfig": {
+        "engineModelId": "android_system_tts",
+        "defaultVoice": "",
+        "languages": [
+          "ru-RU",
+          "en-US"
+        ]
+      }
+    },
+    {
       "name": "Gemma-4-E2B-it",
       "modelId": "litert-community/gemma-4-E2B-it-litert-lm",
       "modelFile": "gemma-4-E2B-it.litertlm",

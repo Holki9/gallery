@@ -414,6 +414,9 @@ class DownloadStorageManager(
     version: String,
     fileName: String = model.downloadInfo.downloadFileName,
   ): Boolean {
+    if (model.downloadInfo.url.isEmpty() && (model.modelType == ModelType.TTS || model.modelType == ModelType.ASR)) {
+      return true
+    }
     val modelRelativePath =
       if (model.downloadInfo.imported) {
         listOf(IMPORTS_DIR, fileName).joinToString(File.separator)
